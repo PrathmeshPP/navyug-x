@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Health & Robotics IoT Dashboard</title>
+    <style>
+        /* === CSS Styling === */
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --text-color: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --success: #22c55e;
+            --warning: #eab308;
+            --danger: #ef4444;
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --font-family: 'Inter', -apple-system, sans-serif;
+        }
+
+        body {
+            margin: 0;
+            font-family: var(--font-family);
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+            color: var(--text-color);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        #app {
+            width: 100%;
+            max-width: 1200px;
+            min-height: 80vh;
+        }
+
+        /* Glassmorphism utility */
+        .glass-panel {
+            background: var(--card-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 2rem;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Typography */
+        h1,
+        h2,
+        h3 {
+            margin-top: 0;
+        }
+
+        h2 {
+            font-size: 1.8rem;
+            text-align: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .text-center {
+            text-align: center;
+        }
+
+        /* Auth Container */
+        .auth-container {
+            max-width: 400px;
+            margin: auto;
+        }
+
+        .input-group {
+            margin-bottom: 1rem;
+        }
+
+        .input-group input {
+            width: 100%;
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 1px solid var(--glass-border);
+            background: rgba(0, 0, 0, 0.2);
+            color: white;
+            font-size: 1rem;
+            box-sizing: border-box;
+            transition: border-color 0.2s;
+        }
+
+        .input-group input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            background: var(--accent);
+            color: #fff;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 1rem;
+            transition: all 0.2s ease;
+        }
+
+        .btn:hover {
+            background: var(--accent-hover);
+            transform: translateY(-1px);
+        }
+
+        .btn:active {
+            transform: translateY(1px);
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            margin-top: 10px;
+        }
+
+        .btn-outline:hover {
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        .error-msg {
+            color: var(--danger);
+            font-size: 0.9rem;
+            text-align: center;
+            margin-top: 10px;
+            min-height: 20px;
+        }
+
+        /* Dashboard Layout */
+        .dashboard-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .btn-logout {
+            width: auto;
+            padding: 8px 16px;
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid var(--danger);
+            color: var(--danger);
+        }
+
+        .btn-logout:hover {
+            background: var(--danger);
+            color: white;
+        }
+
+        /* Alerts */
+        .alert-banner {
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid var(--danger);
+            color: #fca5a5;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+            text-align: center;
+            font-weight: bold;
+            display: none;
+            animation: pulse-border 2s infinite;
+        }
+
+        @keyframes pulse-border {
+            0% {
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+            }
+
+            70% {
+                box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+            }
+        }
+
+        .alert-banner.active {
+            display: block;
+        }
+
+        /* Sensor Grid */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .sensor-card {
+            text-align: center;
+            transition: transform 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .sensor-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .sensor-icon {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .sensor-name {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+        }
+
+        .sensor-value-container {
+            display: flex;
+            justify-content: center;
+            align-items: baseline;
+            gap: 0.25rem;
+            margin: 1rem 0;
+        }
+
+        .sensor-value {
+            font-size: 3rem;
+            font-weight: 700;
+            line-height: 1;
+        }
+
+        .sensor-unit {
+            font-size: 1.2rem;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status-normal {
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--success);
+        }
+
+        .status-danger {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--danger);
+            animation: soft-pulse 1s infinite alternate;
+        }
+
+        @keyframes soft-pulse {
+            from {
+                background: rgba(239, 68, 68, 0.15);
+            }
+
+            to {
+                background: rgba(239, 68, 68, 0.3);
+            }
+        }
+
+        /* Robot Control Section */
+        .robot-control {
+            text-align: center;
+        }
+
+        .btn-robot {
+            font-size: 1.5rem;
+            padding: 1.5rem 3rem;
+            border-radius: 50px;
+            background: linear-gradient(135deg, var(--warning), #ca8a04);
+            color: #000;
+            box-shadow: 0 10px 25px rgba(234, 179, 8, 0.4);
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        .btn-robot:hover {
+            transform: scale(1.05);
+            box-shadow: 0 15px 35px rgba(234, 179, 8, 0.6);
+        }
+
+        .btn-robot.active {
+            background: linear-gradient(135deg, var(--success), #16a34a);
+            color: white;
+            box-shadow: 0 10px 25px rgba(34, 197, 94, 0.4);
+            cursor: default;
+            transform: none;
+        }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            .dashboard-header {
+                flex-direction: column;
+                text-align: center;
+            }
+
+            .btn-robot {
+                width: 100%;
+                padding: 1rem;
+                font-size: 1.2rem;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="app">
+        <!-- Content injected by JavaScript -->
+    </div>
+
+    <!-- === JavaScript Logic === -->
+    <script type="module">
+        // Import Firebase SDKs
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+        import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
+
+        // ==========================================
+        // CONFIGURATION
+        // ==========================================
+        // TODO: Replace with your actual Firebase config
+        const firebaseConfig = {
+            apiKey: "YOUR_API_KEY",
+            authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+            databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com",
+            projectId: "YOUR_PROJECT_ID",
+            storageBucket: "YOUR_PROJECT_ID.appspot.com",
+            messagingSenderId: "YOUR_SENDER_ID",
+            appId: "YOUR_APP_ID"
+        };
+
+        // ==========================================
+        // SENSOR THRESHOLDS (Easily changeable)
+        // ==========================================
+        const THRESHOLDS = {
+            heartRate: { min: 60, max: 100 },      // BPM
+            temperature: { min: 36.0, max: 37.8 }, // Celsius
+            spO2: { min: 95, max: 100 },           // Percentage
+            waterLevel: { min: 10, max: 100 }      // Percentage (Example: <10 is critically low)
+        };
+
+        // ==========================================
+        // INITIALIZATION
+        // ==========================================
+        let appConfigured = !firebaseConfig.apiKey.includes("YOUR_API_KEY");
+        let app, auth, db;
+
+        if (appConfigured) {
+            app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getDatabase(app);
+        } else {
+            console.warn("Firebase config is placeholder. Running in Mock Mode for demonstration.");
+        }
+
+        const appDiv = document.getElementById('app');
+
+        // State Variables
+        let isMockMode = !appConfigured;
+        let sensorData = {
+            heartRate: 75,
+            temperature: 36.6,
+            spO2: 98,
+            waterLevel: 50
+        };
+        let robotCalled = false;
+        let mockInterval = null;
+
+        // ==========================================
+        // UI RENDERING: AUTHENTICATION
+        // ==========================================
+        function renderAuthView(isLogin = true) {
+            appDiv.innerHTML = `
+                <div class="glass-panel auth-container">
+                    <h2>${isLogin ? 'Welcome Back' : 'Create Account'}</h2>
+                    <p class="text-center text-muted" style="margin-bottom: 1.5rem;">
+                        IoT Health & Assistive Robotics
+                    </p>
+                    
+                    <div class="input-group">
+                        <input type="email" id="email" placeholder="Email Address" value="demo@hackathon.com">
+                    </div>
+                    <div class="input-group">
+                        <input type="password" id="password" placeholder="Password" value="demopass123">
+                    </div>
+                    
+                    <button class="btn" id="submitBtn">${isLogin ? 'Sign In' : 'Sign Up'}</button>
+                    <button class="btn btn-outline" id="toggleBtn">
+                        ${isLogin ? 'Need an account? Sign Up' : 'Already have an account? Sign In'}
+                    </button>
+                    
+                    <div class="error-msg" id="authError"></div>
+                    
+                    ${isMockMode ? '<p class="text-muted text-center" style="font-size:0.8rem; margin-top:20px;">[Running in Mock Demo Mode]</p>' : ''}
+                </div>
+            `;
+
+            document.getElementById('submitBtn').addEventListener('click', handleAuthSubmit.bind(null, isLogin));
+            document.getElementById('toggleBtn').addEventListener('click', () => renderAuthView(!isLogin));
+        }
+
+        async function handleAuthSubmit(isLogin) {
+            if (isMockMode) {
+                // In mock mode, bypass real authentication
+                startMockDataSimulation();
+                renderDashboard();
+                return;
+            }
+
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const errorEl = document.getElementById('authError');
+            errorEl.innerText = "";
+
+            try {
+                if (isLogin) {
+                    await signInWithEmailAndPassword(auth, email, password);
+                } else {
+                    await createUserWithEmailAndPassword(auth, email, password);
+                }
+            } catch (error) {
+                errorEl.innerText = error.message;
+            }
+        }
+
+        // ==========================================
+        // UI RENDERING: MAIN DASHBOARD
+        // ==========================================
+        function renderDashboard() {
+            appDiv.innerHTML = `
+                <div class="dashboard-header">
+                    <div>
+                        <h2 style="margin:0; text-align:left;">Health Monitor & Robotics</h2>
+                        <span class="text-muted">Live Patient Data</span>
+                    </div>
+                    <button class="btn btn-logout" id="logoutBtn">Logout</button>
+                </div>
+
+                <div class="alert-banner" id="globalAlert">
+                    ⚠️ CRITICAL ALERT: Abnormal health reading detected. Robot car has been dispatched.
+                </div>
+                
+                <div class="grid" id="sensorsGrid">
+                    <!-- Sensor Cards injected dynamically -->
+                </div>
+
+                <div class="glass-panel robot-control">
+                    <h3 style="margin-bottom: 0.5rem;">Manual Assistive Control</h3>
+                    <p class="text-muted" style="margin-bottom: 1.5rem;">Summon the autonomous robotic assistant to your location.</p>
+                    <button class="btn-robot" id="callRobotBtn">🚨 Bring Car To Me</button>
+                </div>
+            `;
+
+            document.getElementById('logoutBtn').addEventListener('click', handleLogout);
+            document.getElementById('callRobotBtn').addEventListener('click', () => callRobot(true));
+
+            updateDashboardUI();
+        }
+
+        function handleLogout() {
+            if (isMockMode) {
+                if (mockInterval) clearInterval(mockInterval);
+                renderAuthView(true);
+            } else {
+                signOut(auth);
+            }
+        }
+
+        // ==========================================
+        // LOGIC: SENSOR EVALUATION & ALERTS
+        // ==========================================
+        function checkValueStatus(value, thresholds) {
+            if (value < thresholds.min || value > thresholds.max) {
+                return 'danger';
+            }
+            return 'normal';
+        }
+
+        function callRobot(manual = false) {
+            if (!robotCalled) {
+                robotCalled = true;
+
+                // Write to Firebase
+                if (!isMockMode) {
+                    // Update Firebase with follow=true
+                    set(ref(db, 'carCommand/follow'), true);
+                }
+
+                // Update UI visually
+                const btn = document.getElementById('callRobotBtn');
+                if (btn) {
+                    btn.classList.add('active');
+                    btn.innerHTML = '✅ Robot En Route';
+                    btn.disabled = true; // Disable further clicks
+                }
+
+                if (!manual) {
+                    const alertBanner = document.getElementById('globalAlert');
+                    if (alertBanner) alertBanner.classList.add('active');
+                }
+            }
+        }
+
+        function updateDashboardUI() {
+            const grid = document.getElementById('sensorsGrid');
+            if (!grid) return; // Not on dashboard view
+
+            // Evaluate statuses
+            const hrStatus = checkValueStatus(sensorData.heartRate, THRESHOLDS.heartRate);
+            const tempStatus = checkValueStatus(sensorData.temperature, THRESHOLDS.temperature);
+            const spo2Status = checkValueStatus(sensorData.spO2, THRESHOLDS.spO2);
+            const waterStatus = checkValueStatus(sensorData.waterLevel, THRESHOLDS.waterLevel);
+
+            // Check if ANY sensor is in danger
+            const isEmergency = [hrStatus, tempStatus, spo2Status, waterStatus].includes('danger');
+
+            // If emergency detected automatically dispatch robot
+            if (isEmergency && !robotCalled) {
+                callRobot(false); // false signifies automatic trigger
+            }
+
+            // Create Cards HTML
+            const cards = [
+                { title: 'Heart Rate', value: Math.round(sensorData.heartRate), unit: 'BPM', status: hrStatus, icon: '❤️' },
+                { title: 'Body Temp', value: sensorData.temperature.toFixed(1), unit: '°C', status: tempStatus, icon: '🌡️' },
+                { title: 'Blood Oxygen', value: Math.round(sensorData.spO2), unit: '%', status: spo2Status, icon: '🩸' },
+                { title: 'Water Level', value: Math.round(sensorData.waterLevel), unit: '%', status: waterStatus, icon: '💧' }
+            ];
+
+            grid.innerHTML = cards.map(c => `
+                <div class="glass-panel sensor-card">
+                    <div class="sensor-icon">${c.icon}</div>
+                    <div class="sensor-name">${c.title}</div>
+                    <div class="sensor-value-container">
+                        <span class="sensor-value">${c.value}</span>
+                        <span class="sensor-unit">${c.unit}</span>
+                    </div>
+                    <div class="status-badge ${c.status === 'danger' ? 'status-danger' : 'status-normal'}">
+                        ${c.status === 'danger' ? 'Abnormal' : 'Normal'}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // ==========================================
+        // MOCK DATA SIMULATION (For hackathon demo without hardware)
+        // ==========================================
+        function startMockDataSimulation() {
+            robotCalled = false;
+
+            mockInterval = setInterval(() => {
+                // Add slight noise to data
+                sensorData.heartRate += (Math.random() * 4) - 2;
+                sensorData.temperature += (Math.random() * 0.2) - 0.1;
+
+                // Randomly trigger an emergency for demo purposes
+                if (Math.random() > 0.95 && sensorData.heartRate < THRESHOLDS.heartRate.max) {
+                    sensorData.heartRate = 130; // Spike heart rate to trigger alert
+                }
+
+                updateDashboardUI();
+            }, 2000);
+        }
+
+        // ==========================================
+        // FIREBASE LISTENERS
+        // ==========================================
+        if (!isMockMode) {
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    renderDashboard();
+                    robotCalled = false;
+
+                    // Listen for live sensor data
+                    const sensorsRef = ref(db, 'sensors');
+                    onValue(sensorsRef, (snapshot) => {
+                        const data = snapshot.val();
+                        if (data) {
+                            // Merge new data
+                            sensorData = { ...sensorData, ...data };
+                            updateDashboardUI();
+                        }
+                    });
+
+                    // Listen to robot follow state (in case it is reset elsewhere)
+                    const robotRef = ref(db, 'carCommand/follow');
+                    onValue(robotRef, (snapshot) => {
+                        const followState = snapshot.val();
+                        if (followState === false) {
+                            // Reset local state if robot is no longer following
+                            robotCalled = false;
+                            const btn = document.getElementById('callRobotBtn');
+                            if (btn) {
+                                btn.classList.remove('active');
+                                btn.innerHTML = '🚨 Bring Car To Me';
+                                btn.disabled = false;
+                            }
+                            const alertBanner = document.getElementById('globalAlert');
+                            if (alertBanner) alertBanner.classList.remove('active');
+                        }
+                    });
+                } else {
+                    renderAuthView(true);
+                }
+            });
+        } else {
+            // Initial render for Mock Mode
+            renderAuthView(true);
+        }
+    </script>
+</body>
+
+</html>
