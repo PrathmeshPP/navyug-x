@@ -263,6 +263,19 @@
             animation: soft-pulse 1s infinite alternate;
         }
 
+        /* Loading / not-yet-connected state */
+        .status-loading {
+            background: rgba(148, 163, 184, 0.15);
+            color: var(--text-muted);
+        }
+
+        /* Dim the '--' placeholder value while waiting for sensor data */
+        .value-loading {
+            color: var(--text-muted);
+            font-size: 2rem;
+            letter-spacing: 4px;
+        }
+
         @keyframes soft-pulse {
             from {
                 background: rgba(239, 68, 68, 0.15);
@@ -354,7 +367,7 @@
             heartRate: { min: 60, max: 100 },      // BPM
             temperature: { min: 36.0, max: 37.8 }, // Celsius
             spO2: { min: 95, max: 100 },           // Percentage
-            waterLevel: { min: 10, max: 100 }      // Percentage (Example: <10 is critically low)
+            waterLevel: { min: 10, max: 100 }      // Percentage (<10 is critically low)
         };
 
         // ==========================================
@@ -375,12 +388,21 @@
 
         // State Variables
         let isMockMode = !appConfigured;
+
+        // ⚠️ KEY FIX: sensorData starts as null — values only populate after
+        // the first real Firebase snapshot or first mock interval tick.
+        // This prevents stale hardcoded values from showing on the UI.
         let sensorData = {
-            heartRate: 75,
-            temperature: 36.6,
-            spO2: 98,
-            waterLevel: 50
+            heartRate: null,
+            temperature: null,
+            spO2: null,
+            waterLevel: null
         };
+
+        // dataReceived flag — robot alert is blocked until at least one
+        // real data packet has arrived, preventing false auto-dispatch.
+        let dataReceived = false;
+
         let robotCalled = false;
         let mockInterval = null;
 
@@ -402,14 +424,16 @@
                         <input type="password" id="password" placeholder="Password" value="demopass123">
                     </div>
                     
-                    <button class="btn" id="submitBtn">${isLogin ? 'Sign In' : 'Sign Up'}</button>
+                    <button class="btn" id="submitBtn">${isMockMode ? 'Demo Login' : (isLogin ? 'Sign In' : 'Sign Up')}</button>
+                    ${!isMockMode ? `
                     <button class="btn btn-outline" id="toggleBtn">
                         ${isLogin ? 'Need an account? Sign Up' : 'Already have an account? Sign In'}
                     </button>
+                    ` : ''}
                     
                     <div class="error-msg" id="authError"></div>
                     
-                    ${isMockMode ? '<p class="text-muted text-center" style="font-size:0.8rem; margin-top:20px;">[Running in Mock Demo Mode]</p>' : ''}
+                    ${isMockMode ? '<p class="text-muted text-center" style="font-size:0.8rem; margin-top:20px; color: var(--warning);">[Firebase not configured. Proceeding in UI Demo Mode.]</p>' : ''}
                 </div>
             `;
 
@@ -419,8 +443,7 @@
 
         async function handleAuthSubmit(isLogin) {
             if (isMockMode) {
-                // In mock mode, bypass real authentication
-                startMockDataSimulation();
+                // Bypass Firebase auth completely and just show the dashboard UI
                 renderDashboard();
                 return;
             }
@@ -487,21 +510,27 @@
         // ==========================================
         // LOGIC: SENSOR EVALUATION & ALERTS
         // ==========================================
+
+        // Returns 'danger', 'normal', or 'loading' (when value is null)
         function checkValueStatus(value, thresholds) {
-            if (value < thresholds.min || value > thresholds.max) {
-                return 'danger';
-            }
+            if (value === null || value === undefined) return 'loading';
+            if (value < thresholds.min || value > thresholds.max) return 'danger';
             return 'normal';
+        }
+
+        // Format display value — shows '--' when null (not yet received from sensor)
+        function formatValue(value, decimals = 0) {
+            if (value === null || value === undefined) return '--';
+            return decimals > 0 ? value.toFixed(decimals) : Math.round(value);
         }
 
         function callRobot(manual = false) {
             if (!robotCalled) {
                 robotCalled = true;
 
-                // Write to Firebase
+                // Write 'CALL' command to Firebase so the car firmware picks it up
                 if (!isMockMode) {
-                    // Update Firebase with follow=true
-                    set(ref(db, 'carCommand/follow'), true);
+                    set(ref(db, 'car/command'), 'CALL');
                 }
 
                 // Update UI visually
@@ -509,7 +538,7 @@
                 if (btn) {
                     btn.classList.add('active');
                     btn.innerHTML = '✅ Robot En Route';
-                    btn.disabled = true; // Disable further clicks
+                    btn.disabled = true;
                 }
 
                 if (!manual) {
@@ -521,63 +550,54 @@
 
         function updateDashboardUI() {
             const grid = document.getElementById('sensorsGrid');
-            if (!grid) return; // Not on dashboard view
+            if (!grid) return;
 
-            // Evaluate statuses
+            // Evaluate statuses (returns 'loading' if data not yet received)
             const hrStatus = checkValueStatus(sensorData.heartRate, THRESHOLDS.heartRate);
             const tempStatus = checkValueStatus(sensorData.temperature, THRESHOLDS.temperature);
             const spo2Status = checkValueStatus(sensorData.spO2, THRESHOLDS.spO2);
             const waterStatus = checkValueStatus(sensorData.waterLevel, THRESHOLDS.waterLevel);
 
-            // Check if ANY sensor is in danger
-            const isEmergency = [hrStatus, tempStatus, spo2Status, waterStatus].includes('danger');
+            // ⚠️ KEY FIX: Only auto-dispatch robot AFTER at least one real
+            // data packet has been received. Avoids false alerts on page load.
+            const isEmergency = dataReceived &&
+                [hrStatus, tempStatus, spo2Status, waterStatus].includes('danger');
 
-            // If emergency detected automatically dispatch robot
             if (isEmergency && !robotCalled) {
-                callRobot(false); // false signifies automatic trigger
+                callRobot(false);
             }
 
-            // Create Cards HTML
+            // Build sensor cards — '--' shown for values not yet received
             const cards = [
-                { title: 'Heart Rate', value: Math.round(sensorData.heartRate), unit: 'BPM', status: hrStatus, icon: '❤️' },
-                { title: 'Body Temp', value: sensorData.temperature.toFixed(1), unit: '°C', status: tempStatus, icon: '🌡️' },
-                { title: 'Blood Oxygen', value: Math.round(sensorData.spO2), unit: '%', status: spo2Status, icon: '🩸' },
-                { title: 'Water Level', value: Math.round(sensorData.waterLevel), unit: '%', status: waterStatus, icon: '💧' }
+                { title: 'Heart Rate', value: formatValue(sensorData.heartRate), unit: 'BPM', status: hrStatus, icon: '❤️' },
+                { title: 'Body Temp', value: formatValue(sensorData.temperature, 1), unit: '°C', status: tempStatus, icon: '🌡️' },
+                { title: 'Blood Oxygen', value: formatValue(sensorData.spO2), unit: '%', status: spo2Status, icon: '🩸' },
+                { title: 'Water Level', value: formatValue(sensorData.waterLevel), unit: '%', status: waterStatus, icon: '💧' }
             ];
 
-            grid.innerHTML = cards.map(c => `
+            grid.innerHTML = cards.map(c => {
+                const isLoading = c.status === 'loading';
+                const badgeClass = isLoading ? 'status-loading' : (c.status === 'danger' ? 'status-danger' : 'status-normal');
+                const badgeText = isLoading ? 'Connecting...' : (c.status === 'danger' ? 'Abnormal' : 'Normal');
+                return `
                 <div class="glass-panel sensor-card">
                     <div class="sensor-icon">${c.icon}</div>
                     <div class="sensor-name">${c.title}</div>
                     <div class="sensor-value-container">
-                        <span class="sensor-value">${c.value}</span>
-                        <span class="sensor-unit">${c.unit}</span>
+                        <span class="sensor-value ${isLoading ? 'value-loading' : ''}">${c.value}</span>
+                        <span class="sensor-unit">${isLoading ? '' : c.unit}</span>
                     </div>
-                    <div class="status-badge ${c.status === 'danger' ? 'status-danger' : 'status-normal'}">
-                        ${c.status === 'danger' ? 'Abnormal' : 'Normal'}
-                    </div>
-                </div>
-            `).join('');
-        }
+                    <div class="status-badge ${badgeClass}">${badgeText}</div>
+                </div>`;
+            }).join('');
 
-        // ==========================================
-        // MOCK DATA SIMULATION (For hackathon demo without hardware)
-        // ==========================================
-        function startMockDataSimulation() {
-            robotCalled = false;
-
-            mockInterval = setInterval(() => {
-                // Add slight noise to data
-                sensorData.heartRate += (Math.random() * 4) - 2;
-                sensorData.temperature += (Math.random() * 0.2) - 0.1;
-
-                // Randomly trigger an emergency for demo purposes
-                if (Math.random() > 0.95 && sensorData.heartRate < THRESHOLDS.heartRate.max) {
-                    sensorData.heartRate = 130; // Spike heart rate to trigger alert
-                }
-
-                updateDashboardUI();
-            }, 2000);
+            // Disable the Call Robot button until we have live data
+            const callBtn = document.getElementById('callRobotBtn');
+            if (callBtn && !robotCalled) {
+                callBtn.disabled = !dataReceived;
+                if (!dataReceived) callBtn.innerHTML = '⏳ Waiting for sensors...';
+                else callBtn.innerHTML = '🚨 Bring Car To Me';
+            }
         }
 
         // ==========================================
@@ -586,26 +606,32 @@
         if (!isMockMode) {
             onAuthStateChanged(auth, (user) => {
                 if (user) {
-                    renderDashboard();
+                    // Reset state on login — data starts null until Firebase responds
                     robotCalled = false;
+                    dataReceived = false;
+                    sensorData = { heartRate: null, temperature: null, spO2: null, waterLevel: null };
 
-                    // Listen for live sensor data
+                    renderDashboard(); // Renders with '--' placeholders
+
+                    // Listen for live sensor data from Firebase RTDB path: sensors/
+                    // ESP32 sensor node writes to: sensors/heartRate, sensors/temperature, etc.
                     const sensorsRef = ref(db, 'sensors');
                     onValue(sensorsRef, (snapshot) => {
                         const data = snapshot.val();
                         if (data) {
-                            // Merge new data
                             sensorData = { ...sensorData, ...data };
+                            dataReceived = true; // Unlock robot dispatch
                             updateDashboardUI();
                         }
                     });
 
-                    // Listen to robot follow state (in case it is reset elsewhere)
-                    const robotRef = ref(db, 'carCommand/follow');
-                    onValue(robotRef, (snapshot) => {
-                        const followState = snapshot.val();
-                        if (followState === false) {
-                            // Reset local state if robot is no longer following
+                    // Listen to robot car command status
+                    // The car firmware writes 'ARRIVED' or 'IDLE' back to car/status
+                    const robotStatusRef = ref(db, 'car/status');
+                    onValue(robotStatusRef, (snapshot) => {
+                        const status = snapshot.val();
+                        if (status === 'ARRIVED' || status === 'IDLE') {
+                            // Robot has arrived or been reset — unlock the button
                             robotCalled = false;
                             const btn = document.getElementById('callRobotBtn');
                             if (btn) {

@@ -98,9 +98,15 @@ body {
 .sensor-unit { font-size: 1rem; color: #8b949e; }
 .sensor-status { font-size: 0.9rem; margin-top: 10px; padding: 4px 8px; border-radius: 4px; display: inline-block; }
 
-.status-normal { background: rgba(46, 160, 67, 0.2); color: var(--success); }
-.status-warning { background: rgba(219, 171, 9, 0.2); color: var(--warning); }
-.status-danger { background: rgba(248, 81, 73, 0.2); color: var(--danger); animation: pulse 1s infinite alternate; }
+.status-normal  { background: rgba(46, 160, 67, 0.2);  color: var(--success); }
+.status-warning { background: rgba(219, 171, 9, 0.2);  color: var(--warning); }
+.status-danger  { background: rgba(248, 81, 73, 0.2);  color: var(--danger);  animation: pulse 1s infinite alternate; }
+
+/* Loading / not-yet-connected state */
+.status-loading { background: rgba(139, 148, 158, 0.15); color: #8b949e; }
+
+/* Dim '--' placeholder value while waiting for sensor data */
+.value-loading  { color: #8b949e; letter-spacing: 4px; }
 
 .call-robot-section { text-align: center; margin-top: 20px; }
 .btn-call {
