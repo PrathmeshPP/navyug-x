@@ -1,29 +1,8 @@
 // app.js
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
-import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
+// LOCAL SERVER CONFIGURATION
+const API_URL = "http://127.0.0.1:5000/api";
 
-// TODO: Replace with actual Firebase Realtime Database and Auth config for production
-const firebaseConfig = {
-    apiKey: "PLACEHOLDER_API_KEY",
-    authDomain: "PLACEHOLDER_AUTH_DOMAIN",
-    databaseURL: "https://PLACEHOLDER-DATABASE.firebaseio.com",
-    projectId: "PLACEHOLDER_PROJECT_ID",
-    storageBucket: "PLACEHOLDER_STORAGE_BUCKET",
-    messagingSenderId: "PLACEHOLDER_MESSAGING_SENDER_ID",
-    appId: "PLACEHOLDER_APP_ID"
-};
-
-// Mock mode check MUST come before Firebase init.
-// If config is placeholder, skip Firebase entirely to avoid errors.
-const isMock = firebaseConfig.apiKey.startsWith("PLACEHOLDER");
-
-let app, auth, db;
-if (!isMock) {
-    app = initializeApp(firebaseConfig);
-    auth = getAuth(app);
-    db = getDatabase(app);
-}
+const isMock = false; // We use the real local server now
 
 let mockInterval = null;
 
@@ -50,19 +29,9 @@ function renderAuthView(isLogin = true) {
             return;
         }
 
-        const email = document.getElementById('email').value;
-        const password = document.getElementById('password').value;
         const errorEl = document.getElementById('authError');
-
-        try {
-            if (isLogin) {
-                await signInWithEmailAndPassword(auth, email, password);
-            } else {
-                await createUserWithEmailAndPassword(auth, email, password);
-            }
-        } catch (error) {
-            errorEl.innerText = error.message;
-        }
+        errorEl.innerText = "Auth disabled. Bypassing straight to Local Server UI.";
+        renderDashboard();
     });
 
     const toggleBtn = document.getElementById('toggleBtn');
@@ -86,7 +55,9 @@ let currentSensorData = {
     heartRate: null,
     temperature: null,
     spO2: null,
-    waterLevel: null
+    waterLevel: null,
+    ambientTemp: null,
+    ambientHumidity: null
 };
 
 // dataReceived blocks auto-dispatch until we have a real data packet
@@ -107,13 +78,19 @@ function formatValue(value, decimals = 0) {
     return decimals > 0 ? Number(value).toFixed(decimals) : Math.round(value);
 };
 
-function triggerRobotAlert() {
+async function triggerRobotAlert() {
     if (!robotMoving) {
         robotMoving = true;
         updateRobotStatusUI();
-        if (!isMock) {
-            // Write 'CALL' command — robot car firmware reads from 'car/command'
-            set(ref(db, 'car/command'), 'CALL');
+
+        try {
+            await fetch(`${API_URL}/car/command`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: 'CALL' })
+            });
+        } catch (e) {
+            console.error("Failed to send call command", e);
         }
     }
 };
@@ -138,7 +115,6 @@ function renderDashboard() {
         <div class="dashboard-container">
             <div class="glass-panel header">
                 <h2>Health & Assistive Robotics Dashboard</h2>
-                <button class="btn logout-btn" id="logoutBtn">Logout</button>
             </div>
             
             <div class="cards-grid" id="sensorsGrid">
@@ -147,18 +123,12 @@ function renderDashboard() {
 
             <div class="glass-panel call-robot-section">
                 <button class="btn btn-call" id="callRobotBtn">🚨 CALL ROBOT CAR 🚨</button>
+                <div id="apiErrorMsg" style="color:var(--danger); margin-top:10px; font-size: 0.9em; display:none;">Server Disconnected. Retrying...</div>
             </div>
         </div>
     `;
 
-    document.getElementById('logoutBtn').addEventListener('click', () => {
-        if (isMock) {
-            if (mockInterval) clearInterval(mockInterval);
-            renderAuthView(true);
-            return;
-        }
-        signOut(auth);
-    });
+
 
     document.getElementById('callRobotBtn').addEventListener('click', () => {
         triggerRobotAlert();
@@ -178,10 +148,12 @@ function updateDashboardUI() {
     if (!grid) return;
 
     const cards = [
-        { id: 'hr', name: 'Heart Rate', value: formatValue(currentSensorData.heartRate), unit: 'BPM', status: evaluateStatus(currentSensorData.heartRate, thresholds.heartRate.min, thresholds.heartRate.max) },
-        { id: 'temp', name: 'Body Temp', value: formatValue(currentSensorData.temperature, 1), unit: '°C', status: evaluateStatus(currentSensorData.temperature, thresholds.temperature.min, thresholds.temperature.max) },
-        { id: 'spo2', name: 'Blood Oxygen', value: formatValue(currentSensorData.spO2), unit: '%', status: evaluateStatus(currentSensorData.spO2, thresholds.spO2.min, thresholds.spO2.max) },
-        { id: 'water', name: 'Water Level', value: formatValue(currentSensorData.waterLevel), unit: '%', status: evaluateStatus(currentSensorData.waterLevel, thresholds.waterLevel.min, thresholds.waterLevel.max) }
+        { id: 'hr', name: 'Heart Rate', value: formatValue(currentSensorData.heartRate), unit: 'BPM', status: evaluateStatus(currentSensorData.heartRate, THRESHOLDS.heartRate.min, THRESHOLDS.heartRate.max) },
+        { id: 'temp', name: 'Body Temp', value: formatValue(currentSensorData.temperature, 1), unit: '°C', status: evaluateStatus(currentSensorData.temperature, THRESHOLDS.temperature.min, THRESHOLDS.temperature.max) },
+        { id: 'spo2', name: 'Blood Oxygen', value: formatValue(currentSensorData.spO2), unit: '%', status: evaluateStatus(currentSensorData.spO2, THRESHOLDS.spO2.min, THRESHOLDS.spO2.max) },
+        { id: 'water', name: 'Water Level', value: formatValue(currentSensorData.waterLevel), unit: '%', status: evaluateStatus(currentSensorData.waterLevel, THRESHOLDS.waterLevel.min, THRESHOLDS.waterLevel.max) },
+        { id: 'ambTemp', name: 'Room Temp', value: formatValue(currentSensorData.ambientTemp, 1), unit: '°C', status: evaluateStatus(currentSensorData.ambientTemp, THRESHOLDS.ambientTemp.min, THRESHOLDS.ambientTemp.max) },
+        { id: 'ambHum', name: 'Room Humidity', value: formatValue(currentSensorData.ambientHumidity), unit: '%', status: evaluateStatus(currentSensorData.ambientHumidity, THRESHOLDS.ambientHumidity.min, THRESHOLDS.ambientHumidity.max) }
     ];
 
     let hasDanger = false;
@@ -205,46 +177,39 @@ function updateDashboardUI() {
     }
 };
 
-// Auth state listener
-if (!isMock) {
-    onAuthStateChanged(auth, (user) => {
-        if (user) {
-            // Reset state on login
-            robotMoving = false;
-            dataReceived = false;
-            currentSensorData = { heartRate: null, temperature: null, spO2: null, waterLevel: null };
+// ==========================================
+// DATA POLLING FROM LOCAL PYTHON SERVER
+// ==========================================
+async function fetchServerData() {
+    try {
+        const response = await fetch(`${API_URL}/data`);
+        const dbState = await response.json();
 
-            renderDashboard();
+        document.getElementById('apiErrorMsg').style.display = 'none';
 
-            // Listen to sensor data (path must match ESP32 firmware)
-            const sensorsRef = ref(db, 'sensors');
-            onValue(sensorsRef, (snapshot) => {
-                const data = snapshot.val();
-                if (data) {
-                    currentSensorData = { ...currentSensorData, ...data };
-                    dataReceived = true; // Unlock robot dispatch
-                    updateDashboardUI();
-                }
-            });
-
-            // Listen to robot car status (firmware writes back to car/status)
-            const robotRef = ref(db, 'car/status');
-            onValue(robotRef, (snapshot) => {
-                const status = snapshot.val();
-                if (status === 'ARRIVED' || status === 'IDLE') {
-                    robotMoving = false;
-                    updateRobotStatusUI();
-                } else if (status === 'MOVING_TO_USER') {
-                    robotMoving = true;
-                    updateRobotStatusUI();
-                }
-            });
-
-        } else {
-            renderAuthView(true);
+        if (dbState.sensors.heartRate !== null || dbState.sensors.temperature !== null || dbState.sensors.ambientTemp !== null) {
+            currentSensorData = { ...currentSensorData, ...dbState.sensors };
+            dataReceived = true;
         }
-    });
-} else {
-    // Start with mock auth view
-    renderAuthView(true);
+
+        if (dbState.car.status === 'ARRIVED' || dbState.car.status === 'IDLE') {
+            robotMoving = false;
+            if (dbState.car.command === 'IDLE') {
+                updateRobotStatusUI();
+            }
+        } else if (dbState.car.status === 'MOVING_TO_USER') {
+            robotMoving = true;
+            updateRobotStatusUI();
+        }
+
+        updateDashboardUI();
+    } catch (error) {
+        document.getElementById('apiErrorMsg').style.display = 'block';
+        console.error("Local Server Polling failed", error);
+    }
 }
+
+// Skip Login Screen since auth is disabled
+renderDashboard();
+// Poll every 1 second
+setInterval(fetchServerData, 1000);

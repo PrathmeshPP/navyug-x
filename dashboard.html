@@ -347,122 +347,29 @@
         import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
 
         // ==========================================
-        // CONFIGURATION
+        // LOCAL SERVER CONFIGURATION
         // ==========================================
-        // TODO: Replace with your actual Firebase config
-        const firebaseConfig = {
-            apiKey: "YOUR_API_KEY",
-            authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-            databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com",
-            projectId: "YOUR_PROJECT_ID",
-            storageBucket: "YOUR_PROJECT_ID.appspot.com",
-            messagingSenderId: "YOUR_SENDER_ID",
-            appId: "YOUR_APP_ID"
-        };
+        // The dashboard expects your Python server to be running here:
+        const API_URL = "http://127.0.0.1:5000/api";
 
         // ==========================================
         // SENSOR THRESHOLDS (Easily changeable)
         // ==========================================
         const THRESHOLDS = {
             heartRate: { min: 60, max: 100 },      // BPM
-            temperature: { min: 36.0, max: 37.8 }, // Celsius
+            temperature: { min: 36.0, max: 37.8 }, // Celsius (internal/patient)
             spO2: { min: 95, max: 100 },           // Percentage
-            waterLevel: { min: 10, max: 100 }      // Percentage (<10 is critically low)
+            waterLevel: { min: 10, max: 100 },     // Percentage (<10 is critically low)
+            ambientTemp: { min: 10.0, max: 40.0 }, // Celsius (room)
+            ambientHumidity: { min: 30, max: 70 }  // Percentage (room)
         };
-
-        // ==========================================
-        // INITIALIZATION
-        // ==========================================
-        let appConfigured = !firebaseConfig.apiKey.includes("YOUR_API_KEY");
-        let app, auth, db;
-
-        if (appConfigured) {
-            app = initializeApp(firebaseConfig);
-            auth = getAuth(app);
-            db = getDatabase(app);
-        } else {
-            console.warn("Firebase config is placeholder. Running in Mock Mode for demonstration.");
-        }
 
         const appDiv = document.getElementById('app');
 
-        // State Variables
-        let isMockMode = !appConfigured;
-
-        // ⚠️ KEY FIX: sensorData starts as null — values only populate after
-        // the first real Firebase snapshot or first mock interval tick.
-        // This prevents stale hardcoded values from showing on the UI.
-        let sensorData = {
-            heartRate: null,
-            temperature: null,
-            spO2: null,
-            waterLevel: null
-        };
-
-        // dataReceived flag — robot alert is blocked until at least one
-        // real data packet has arrived, preventing false auto-dispatch.
+        let sensorData = { heartRate: null, temperature: null, spO2: null, waterLevel: null, ambientTemp: null, ambientHumidity: null };
         let dataReceived = false;
-
         let robotCalled = false;
-        let mockInterval = null;
-
-        // ==========================================
-        // UI RENDERING: AUTHENTICATION
-        // ==========================================
-        function renderAuthView(isLogin = true) {
-            appDiv.innerHTML = `
-                <div class="glass-panel auth-container">
-                    <h2>${isLogin ? 'Welcome Back' : 'Create Account'}</h2>
-                    <p class="text-center text-muted" style="margin-bottom: 1.5rem;">
-                        IoT Health & Assistive Robotics
-                    </p>
-                    
-                    <div class="input-group">
-                        <input type="email" id="email" placeholder="Email Address" value="demo@hackathon.com">
-                    </div>
-                    <div class="input-group">
-                        <input type="password" id="password" placeholder="Password" value="demopass123">
-                    </div>
-                    
-                    <button class="btn" id="submitBtn">${isMockMode ? 'Demo Login' : (isLogin ? 'Sign In' : 'Sign Up')}</button>
-                    ${!isMockMode ? `
-                    <button class="btn btn-outline" id="toggleBtn">
-                        ${isLogin ? 'Need an account? Sign Up' : 'Already have an account? Sign In'}
-                    </button>
-                    ` : ''}
-                    
-                    <div class="error-msg" id="authError"></div>
-                    
-                    ${isMockMode ? '<p class="text-muted text-center" style="font-size:0.8rem; margin-top:20px; color: var(--warning);">[Firebase not configured. Proceeding in UI Demo Mode.]</p>' : ''}
-                </div>
-            `;
-
-            document.getElementById('submitBtn').addEventListener('click', handleAuthSubmit.bind(null, isLogin));
-            document.getElementById('toggleBtn').addEventListener('click', () => renderAuthView(!isLogin));
-        }
-
-        async function handleAuthSubmit(isLogin) {
-            if (isMockMode) {
-                // Bypass Firebase auth completely and just show the dashboard UI
-                renderDashboard();
-                return;
-            }
-
-            const email = document.getElementById('email').value;
-            const password = document.getElementById('password').value;
-            const errorEl = document.getElementById('authError');
-            errorEl.innerText = "";
-
-            try {
-                if (isLogin) {
-                    await signInWithEmailAndPassword(auth, email, password);
-                } else {
-                    await createUserWithEmailAndPassword(auth, email, password);
-                }
-            } catch (error) {
-                errorEl.innerText = error.message;
-            }
-        }
+        let pollInterval = null;
 
         // ==========================================
         // UI RENDERING: MAIN DASHBOARD
@@ -474,7 +381,6 @@
                         <h2 style="margin:0; text-align:left;">Health Monitor & Robotics</h2>
                         <span class="text-muted">Live Patient Data</span>
                     </div>
-                    <button class="btn btn-logout" id="logoutBtn">Logout</button>
                 </div>
 
                 <div class="alert-banner" id="globalAlert">
@@ -489,51 +395,43 @@
                     <h3 style="margin-bottom: 0.5rem;">Manual Assistive Control</h3>
                     <p class="text-muted" style="margin-bottom: 1.5rem;">Summon the autonomous robotic assistant to your location.</p>
                     <button class="btn-robot" id="callRobotBtn">🚨 Bring Car To Me</button>
+                    <div id="apiErrorMsg" style="color:var(--danger); margin-top:10px; font-size: 0.9em; display:none;">Server Disconnected. Retrying...</div>
                 </div>
             `;
 
-            document.getElementById('logoutBtn').addEventListener('click', handleLogout);
             document.getElementById('callRobotBtn').addEventListener('click', () => callRobot(true));
-
             updateDashboardUI();
-        }
-
-        function handleLogout() {
-            if (isMockMode) {
-                if (mockInterval) clearInterval(mockInterval);
-                renderAuthView(true);
-            } else {
-                signOut(auth);
-            }
         }
 
         // ==========================================
         // LOGIC: SENSOR EVALUATION & ALERTS
         // ==========================================
-
-        // Returns 'danger', 'normal', or 'loading' (when value is null)
         function checkValueStatus(value, thresholds) {
             if (value === null || value === undefined) return 'loading';
             if (value < thresholds.min || value > thresholds.max) return 'danger';
             return 'normal';
         }
 
-        // Format display value — shows '--' when null (not yet received from sensor)
         function formatValue(value, decimals = 0) {
             if (value === null || value === undefined) return '--';
             return decimals > 0 ? value.toFixed(decimals) : Math.round(value);
         }
 
-        function callRobot(manual = false) {
+        async function callRobot(manual = false) {
             if (!robotCalled) {
                 robotCalled = true;
 
-                // Write 'CALL' command to Firebase so the car firmware picks it up
-                if (!isMockMode) {
-                    set(ref(db, 'car/command'), 'CALL');
+                // POST to local server telling the car to come
+                try {
+                    await fetch(`${API_URL}/car/command`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ command: 'CALL' })
+                    });
+                } catch (e) {
+                    console.error("Failed to send call command", e);
                 }
 
-                // Update UI visually
                 const btn = document.getElementById('callRobotBtn');
                 if (btn) {
                     btn.classList.add('active');
@@ -552,27 +450,27 @@
             const grid = document.getElementById('sensorsGrid');
             if (!grid) return;
 
-            // Evaluate statuses (returns 'loading' if data not yet received)
             const hrStatus = checkValueStatus(sensorData.heartRate, THRESHOLDS.heartRate);
             const tempStatus = checkValueStatus(sensorData.temperature, THRESHOLDS.temperature);
             const spo2Status = checkValueStatus(sensorData.spO2, THRESHOLDS.spO2);
             const waterStatus = checkValueStatus(sensorData.waterLevel, THRESHOLDS.waterLevel);
+            const ambTempStatus = checkValueStatus(sensorData.ambientTemp, THRESHOLDS.ambientTemp);
+            const ambHumStatus = checkValueStatus(sensorData.ambientHumidity, THRESHOLDS.ambientHumidity);
 
-            // ⚠️ KEY FIX: Only auto-dispatch robot AFTER at least one real
-            // data packet has been received. Avoids false alerts on page load.
             const isEmergency = dataReceived &&
-                [hrStatus, tempStatus, spo2Status, waterStatus].includes('danger');
+                [hrStatus, tempStatus, spo2Status, waterStatus, ambTempStatus, ambHumStatus].includes('danger');
 
             if (isEmergency && !robotCalled) {
                 callRobot(false);
             }
 
-            // Build sensor cards — '--' shown for values not yet received
             const cards = [
                 { title: 'Heart Rate', value: formatValue(sensorData.heartRate), unit: 'BPM', status: hrStatus, icon: '❤️' },
                 { title: 'Body Temp', value: formatValue(sensorData.temperature, 1), unit: '°C', status: tempStatus, icon: '🌡️' },
                 { title: 'Blood Oxygen', value: formatValue(sensorData.spO2), unit: '%', status: spo2Status, icon: '🩸' },
-                { title: 'Water Level', value: formatValue(sensorData.waterLevel), unit: '%', status: waterStatus, icon: '💧' }
+                { title: 'Water Level', value: formatValue(sensorData.waterLevel), unit: '%', status: waterStatus, icon: '💧' },
+                { title: 'Room Temp', value: formatValue(sensorData.ambientTemp, 1), unit: '°C', status: ambTempStatus, icon: '🏠' },
+                { title: 'Room Humidity', value: formatValue(sensorData.ambientHumidity), unit: '%', status: ambHumStatus, icon: '🌫️' }
             ];
 
             grid.innerHTML = cards.map(c => {
@@ -591,7 +489,6 @@
                 </div>`;
             }).join('');
 
-            // Disable the Call Robot button until we have live data
             const callBtn = document.getElementById('callRobotBtn');
             if (callBtn && !robotCalled) {
                 callBtn.disabled = !dataReceived;
@@ -601,56 +498,47 @@
         }
 
         // ==========================================
-        // FIREBASE LISTENERS
+        // DATA POLLING FROM LOCAL PYTHON SERVER
         // ==========================================
-        if (!isMockMode) {
-            onAuthStateChanged(auth, (user) => {
-                if (user) {
-                    // Reset state on login — data starts null until Firebase responds
-                    robotCalled = false;
-                    dataReceived = false;
-                    sensorData = { heartRate: null, temperature: null, spO2: null, waterLevel: null };
+        async function fetchServerData() {
+            try {
+                const response = await fetch(`${API_URL}/data`);
+                const dbState = await response.json();
 
-                    renderDashboard(); // Renders with '--' placeholders
+                document.getElementById('apiErrorMsg').style.display = 'none';
 
-                    // Listen for live sensor data from Firebase RTDB path: sensors/
-                    // ESP32 sensor node writes to: sensors/heartRate, sensors/temperature, etc.
-                    const sensorsRef = ref(db, 'sensors');
-                    onValue(sensorsRef, (snapshot) => {
-                        const data = snapshot.val();
-                        if (data) {
-                            sensorData = { ...sensorData, ...data };
-                            dataReceived = true; // Unlock robot dispatch
-                            updateDashboardUI();
-                        }
-                    });
-
-                    // Listen to robot car command status
-                    // The car firmware writes 'ARRIVED' or 'IDLE' back to car/status
-                    const robotStatusRef = ref(db, 'car/status');
-                    onValue(robotStatusRef, (snapshot) => {
-                        const status = snapshot.val();
-                        if (status === 'ARRIVED' || status === 'IDLE') {
-                            // Robot has arrived or been reset — unlock the button
-                            robotCalled = false;
-                            const btn = document.getElementById('callRobotBtn');
-                            if (btn) {
-                                btn.classList.remove('active');
-                                btn.innerHTML = '🚨 Bring Car To Me';
-                                btn.disabled = false;
-                            }
-                            const alertBanner = document.getElementById('globalAlert');
-                            if (alertBanner) alertBanner.classList.remove('active');
-                        }
-                    });
-                } else {
-                    renderAuthView(true);
+                // Check if any real sensor data has bubbled up
+                if (dbState.sensors.heartRate !== null || dbState.sensors.temperature !== null || dbState.sensors.ambientTemp !== null) {
+                    sensorData = { ...sensorData, ...dbState.sensors };
+                    dataReceived = true;
                 }
-            });
-        } else {
-            // Initial render for Mock Mode
-            renderAuthView(true);
+
+                // Check Robot Status to unlock button if it Returned/Arrived
+                if (dbState.car.status === 'ARRIVED' || dbState.car.status === 'IDLE') {
+                    if (dbState.car.command === 'IDLE' && robotCalled) {
+                        robotCalled = false;
+                        const btn = document.getElementById('callRobotBtn');
+                        if (btn) {
+                            btn.classList.remove('active');
+                            btn.innerHTML = '🚨 Bring Car To Me';
+                            btn.disabled = false;
+                        }
+                        const alertBanner = document.getElementById('globalAlert');
+                        if (alertBanner) alertBanner.classList.remove('active');
+                    }
+                }
+
+                updateDashboardUI();
+            } catch (error) {
+                document.getElementById('apiErrorMsg').style.display = 'block';
+                console.error("Local Server Polling failed - is server.py running?", error);
+            }
         }
+
+        // Skip Login Screen, Go Straight to Dashboard!
+        renderDashboard();
+        // Poll every 1 second
+        pollInterval = setInterval(fetchServerData, 1000);
     </script>
 </body>
 
